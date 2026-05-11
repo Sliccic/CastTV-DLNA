@@ -1,0 +1,34 @@
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# Android Studio
+*.iml
+.idea/
+*.log
+
+# Build outputs
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# Local configuration
+local.properties
+
+# Generated files
+app/build/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temp files
+*.tmp
+*.bak
+repo_create.json
+
+# Secrets (不要提交!)
+secrets.properties
+keystore.jks

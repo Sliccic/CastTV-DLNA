@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">红果投屏助手</string>
+    <string name="accessibility_service_description">
+        红果短剧DLNA投屏助手\n\n
+        功能说明：\n
+        1. 自动检测红果短剧播放界面\n
+        2. 提取当前播放视频的真实URL\n
+        3. 通过DLNA协议投屏到电视\n\n
+        使用方法：\n
+        1. 打开红果短剧播放视频\n
+        2. 点击悬浮的\"投屏\"按钮\n
+        3. 选择电视设备开始投屏\n\n
+        隐私声明：\n
+        本服务仅读取屏幕内容以识别视频播放状态，不会收集任何个人信息。
+    </string>
+    <string name="title_activity_main">红果投屏助手</string>
+    <string name="btn_start_service">启动监听服务</string>
+    <string name="btn_stop_service">停止服务</string>
+    <string name="btn_scan_devices">扫描设备</string>
+    <string name="status_service_running">✅ 服务运行中</string>
+    <string name="status_service_stopped">⏹️ 服务已停止</string>
+    <string name="status_scanning">🔍 扫描设备中…</string>
+    <string name="status_connected">📺 已连接: %s</string>
+    <string name="status_disconnected">❌ 未连接</string>
+    <string name="hint_open_hongguo">请先打开红果短剧并播放视频</string>
+    <string name="toast_casting_started">开始投屏到 %s</string>
+    <string name="toast_casting_stopped">已停止投屏</string>
+    <string name="toast_no_device_found">未找到DLNA设备，请检查网络</string>
+    <string name="toast_no_video_url">未检测到视频URL</string>
+    <string name="notification_channel_name">DLNA投屏服务</string>
+    <string name="notification_channel_desc">后台运行DLNA投屏服务</string>
+    <string name="notification_title">红果投屏助手运行中</string>
+    <string name="notification_content">点击打开控制面板</string>
+</resources>
