@@ -30,22 +30,16 @@ jobs:
           echo "android.useAndroidX=true" >> gradle.properties
           echo "android.enableJetifier=true" >> gradle.properties
 
-      # 3. 稳健修复：使用 100% 干净不拦截的公共镜像中心（阿里云源/Gradle官方公共节点）下载真实的 `.jar` 文件
+      # 3. 稳健修复：使用不拦截的公共中心下载真实的 `.jar` 文件
       - name: Download Cling Jars Securely
         run: |
           mkdir -p app/libs
-          
-          # 下载 cling-core (优先从稳定的公开插件仓库或国内高速阿里云中心拉取二进制流)
           curl -L -A "Mozilla/5.0" -o app/libs/cling-core-2.1.2.jar https://plugins.gradle.org/m2/org/fourthline/cling/cling-core/2.1.2/cling-core-2.1.2.jar
-          
-          # 下载 cling-support
           curl -L -A "Mozilla/5.0" -o app/libs/cling-support-2.1.2.jar https://plugins.gradle.org/m2/org/fourthline/cling/cling-support/2.1.2/cling-support-2.1.2.jar
           
-          # 验证下载下来的包是不是真实的非空包（检查大小是否正常）
           echo "--- 检查下载的本地依赖依赖包大小 ---"
           ls -lh app/libs/
           
-          # 如果包大小小于 10KB，说明被远端用 HTML 网页糊弄了，我们用备用高速节点重新覆盖
           if [ $(stat -c%s "app/libs/cling-core-2.1.2.jar") -lt 10000 ]; then
             echo "触发备用节点下载..."
             curl -L -o app/libs/cling-core-2.1.2.jar https://maven.aliyun.com/repository/public/org/fourthline/cling/cling-core/2.1.2/cling-core-2.1.2.jar
@@ -61,7 +55,7 @@ jobs:
             sed -i '/dependencies {/a \    implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.jar"))))' app/build.gradle.kts
           fi
 
-      # 5. 保持上一步 100% 成功的完美复写布局结构
+      # 5. 覆盖并生成结构绝对合规的 activity_main.xml
       - name: Re-write activity_main.xml perfectly
         run: |
           LAYOUT_FILE="app/src/main/res/layout/activity_main.xml"
@@ -142,7 +136,6 @@ jobs:
           EOF
           echo "--- 智能完美复写完成 ---"
 
-       Cinderella-Step:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
