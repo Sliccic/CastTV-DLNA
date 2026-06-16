@@ -45,19 +45,31 @@ jobs:
             sed -i '/dependencies {/a \    implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.jar"))))' app/build.gradle.kts
           fi
 
-      # 5. 外科手术式修复：精准定位该多行 TextView 的最后一行属性并妥善闭合
-      - name: Fix XML End Tag Precisely
+      # 5. 精准修复：解决 TextView 闭合，并暴力降维修复缺失的 ConstraintLayout 闭合标签
+      - name: Deep Fix XML Structure Errors
         run: |
           LAYOUT_FILE="app/src/main/res/layout/activity_main.xml"
           if [ -f "$LAYOUT_FILE" ]; then
-            echo "--- 精准修复前 160-167 行内容 ---"
-            sed -n '160,167p' $LAYOUT_FILE
+            echo "--- 执行布局文件结构智能容错修复 ---"
             
-            # 找到 app:layout_constraintEnd_toEndOf="parent" 这一行，将其替换为规范闭合的 parent" />
+            # 先执行上一轮成功的 TextView 精准闭合
             sed -i 's/layout_constraintEnd_toEndOf="parent"/layout_constraintEnd_toEndOf="parent" \/>/g' $LAYOUT_FILE
             
-            echo "--- 精准修复后 160-167 行内容 ---"
-            sed -n '160,167p' $LAYOUT_FILE
+            # 清理因上一步可能重复生成的错位闭合符号（做一层去重防错）
+            sed -i 's/\/> \/>/\/>/g' $LAYOUT_FILE
+            
+            # 解决 ConstraintLayout 缺失闭合标签的终极手段：
+            # 现代 Android 布局文件最后一行通常是总闭合（如 </layout>），我们在总闭合上方强行补齐缺失的内部容器尾巴
+            # 先移除可能写错位的零散闭合，直接在倒数第二行强行追加闭合，确保结构树能够强制收尾
+            if grep -q "</layout>" $LAYOUT_FILE; then
+              sed -i '/<\/layout>/i \    <\/androidx.constraintlayout.widget.ConstraintLayout>' $LAYOUT_FILE
+            else
+              # 如果没有 data binding 的外层 layout 标签，则在文件最后追加
+              echo "</androidx.constraintlayout.widget.ConstraintLayout>" >> $LAYOUT_FILE
+            fi
+            
+            echo "--- 修复完成，打印文件末尾 20 行验证结构 ---"
+            tail -n 20 $LAYOUT_FILE
           fi
 
       - name: Grant execute permission for gradlew
