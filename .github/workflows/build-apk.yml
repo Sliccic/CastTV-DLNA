@@ -1,9 +1,9 @@
 name: Build CastTV APK
 
 on:
-  workflow_dispatch: # 允许你在网页上点击按钮手动触发编译
+  workflow_dispatch: # 支持手动点击触发
   push:
-    branches: [ "main", "master" ] # 当你提交代码到 main 或 master 分支时自动编译
+    branches: [ "main", "master" ]
 
 jobs:
   build:
@@ -14,7 +14,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 2. 配置 Java 环境 (根据 README 要求的 Gradle 8.5，我们选用 JDK 17)
+      # 2. 配置 Java 环境 (JDK 17)
       - name: set up JDK 17
         uses: actions/setup-java@v4
         with:
@@ -22,15 +22,19 @@ jobs:
           distribution: 'temurin'
           cache: gradle
 
-      # 3. 赋予 Gradle 脚本执行权限
+      # 3. 核心修复：既然你漏掉了 gradlew，我们用系统自带的 gradle 自动重新生成一个 wrapper 钥匙
+      - name: Regenerate Gradle Wrapper
+        run: gradle wrapper --gradle-version 8.5
+
+      # 4. 赋予新生成的 gradlew 脚本可执行权限
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      # 4. 执行编译 (同时编译 Debug 和 Release 版本)
+      # 5. 执行编译
       - name: Build with Gradle
         run: ./gradlew assembleDebug assembleRelease
 
-      # 5. 将编译好的 APK 提取并上传到 GitHub 云端供你下载
+      # 6. 上传编译好的 APK 供下载
       - name: Upload APK Artifacts
         uses: actions/upload-artifact@v4
         with:
