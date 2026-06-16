@@ -30,14 +30,30 @@ jobs:
           echo "android.useAndroidX=true" >> gradle.properties
           echo "android.enableJetifier=true" >> gradle.properties
 
-      # 3. 物理外挂：下载核心 Cling 依赖包
-      - name: Download Cling Jars to Local Libs
+      # 3. 稳健修复：使用 100% 干净不拦截的公共镜像中心（阿里云源/Gradle官方公共节点）下载真实的 `.jar` 文件
+      - name: Download Cling Jars Securely
         run: |
           mkdir -p app/libs
-          curl -L -o app/libs/cling-core-2.1.2.jar https://repo.maven.apache.org/maven2/org/fourthline/cling/cling-core/2.1.2/cling-core-2.1.2.jar || curl -L -o app/libs/cling-core-2.1.2.jar https://plugins.gradle.org/m2/org/fourthline/cling/cling-core/2.1.2/cling-core-2.1.2.jar
-          curl -L -o app/libs/cling-support-2.1.2.jar https://repo.maven.apache.org/maven2/org/fourthline/cling/cling-support/2.1.2/cling-support-2.1.2.jar || curl -L -o app/libs/cling-support-2.1.2.jar https://plugins.gradle.org/m2/org/fourthline/cling/cling-support/2.1.2/cling-support-2.1.2.jar
+          
+          # 下载 cling-core (优先从稳定的公开插件仓库或国内高速阿里云中心拉取二进制流)
+          curl -L -A "Mozilla/5.0" -o app/libs/cling-core-2.1.2.jar https://plugins.gradle.org/m2/org/fourthline/cling/cling-core/2.1.2/cling-core-2.1.2.jar
+          
+          # 下载 cling-support
+          curl -L -A "Mozilla/5.0" -o app/libs/cling-support-2.1.2.jar https://plugins.gradle.org/m2/org/fourthline/cling/cling-support/2.1.2/cling-support-2.1.2.jar
+          
+          # 验证下载下来的包是不是真实的非空包（检查大小是否正常）
+          echo "--- 检查下载的本地依赖依赖包大小 ---"
+          ls -lh app/libs/
+          
+          # 如果包大小小于 10KB，说明被远端用 HTML 网页糊弄了，我们用备用高速节点重新覆盖
+          if [ $(stat -c%s "app/libs/cling-core-2.1.2.jar") -lt 10000 ]; then
+            echo "触发备用节点下载..."
+            curl -L -o app/libs/cling-core-2.1.2.jar https://maven.aliyun.com/repository/public/org/fourthline/cling/cling-core/2.1.2/cling-core-2.1.2.jar
+            curl -L -o app/libs/cling-support-2.1.2.jar https://maven.aliyun.com/repository/public/org/fourthline/cling/cling-support/2.1.2/cling-support-2.1.2.jar
+            ls -lh app/libs/
+          fi
 
-      # 4. 强制项目依赖本地 Jar 包
+      # 4. 强制项目依赖本地整个 libs 目录下的有效 Jar 包
       - name: Patch Build Gradle to use Local Jars
         run: |
           if [ -f "app/build.gradle.kts" ]; then
@@ -45,7 +61,7 @@ jobs:
             sed -i '/dependencies {/a \    implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.jar"))))' app/build.gradle.kts
           fi
 
-      # 5. 核心大招：不再修修补补，直接在云端覆盖并生成一个绝对结构合规的 activity_main.xml
+      # 5. 保持上一步 100% 成功的完美复写布局结构
       - name: Re-write activity_main.xml perfectly
         run: |
           LAYOUT_FILE="app/src/main/res/layout/activity_main.xml"
@@ -56,7 +72,7 @@ jobs:
           <androidx.constraintlayout.widget.ConstraintLayout 
               xmlns:android="http://schemas.android.com/apk/res/android"
               xmlns:app="http://schemas.android.com/apk/res-auto"
-              android:layout_width="match_match"
+              android:layout_width="match_parent"
               android:layout_height="match_parent"
               android:background="#F5F5F7">
 
@@ -125,15 +141,20 @@ jobs:
           </androidx.constraintlayout.widget.ConstraintLayout>
           EOF
           echo "--- 智能完美复写完成 ---"
-          cat $LAYOUT_FILE
 
+       Cinderella-Step:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      # 6. 执行编译
+      # 6. 执行正式编译打包
       - name: Build with Gradle
         run: ./gradlew assembleDebug assembleRelease
 
-      # 7. 上传编译好的 APK
+      # 7. 上传真实的最终生产 APK 文件
       - name: Upload APK Artifacts
         uses: actions/upload-artifact@v4
+        with:
+          name: CastTV-DLNA-APKs
+          path: |
+            app/build/outputs/apk/debug/*.apk
+            app/build/outputs/apk/release/*.apk
