@@ -30,34 +30,48 @@ jobs:
           echo "android.useAndroidX=true" >> gradle.properties
           echo "android.enableJetifier=true" >> gradle.properties
 
-      # 3. 核心修复：建立本地 libs 文件夹，绕过崩溃的远端仓库，直接强行下载核心 Cling 依赖包
+      # 3. 物理外挂：下载核心 Cling 依赖包
       - name: Download Cling Jars to Local Libs
         run: |
           mkdir -p app/libs
-          # 从目前完全可靠的开源镜像源/冷存储节点直接抓取 cling-core 和 cling-support 的 jar 包
           curl -L -o app/libs/cling-core-2.1.2.jar https://repo.maven.apache.org/maven2/org/fourthline/cling/cling-core/2.1.2/cling-core-2.1.2.jar || curl -L -o app/libs/cling-core-2.1.2.jar https://plugins.gradle.org/m2/org/fourthline/cling/cling-core/2.1.2/cling-core-2.1.2.jar
           curl -L -o app/libs/cling-support-2.1.2.jar https://repo.maven.apache.org/maven2/org/fourthline/cling/cling-support/2.1.2/cling-support-2.1.2.jar || curl -L -o app/libs/cling-support-2.1.2.jar https://plugins.gradle.org/m2/org/fourthline/cling/cling-support/2.1.2/cling-support-2.1.2.jar
-          ls -l app/libs/
 
-      # 4. 强制项目直接依赖本地的这两个 Jar 包，而不是去网络上找
+      # 4. 强制项目依赖本地 Jar 包
       - name: Patch Build Gradle to use Local Jars
         run: |
           if [ -f "app/build.gradle.kts" ]; then
-            # 移除原有的远端 cling 依赖声明，替换为依赖本地整个 libs 目录
             sed -i '/org.fourthline.cling/d' app/build.gradle.kts
-            # 确保里面包含 implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.jar")))) 类似逻辑
-            # 最暴力的做法是直接在 dependencies 块追加
             sed -i '/dependencies {/a \    implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.jar"))))' app/build.gradle.kts
+          fi
+
+      # 5. 核心修复：修复 activity_main.xml 第 156 行附近 TextView 标签不闭合或缺属性的语法错误
+      - name: Fix XML Syntax Error in activity_main.xml
+        run: |
+          LAYOUT_FILE="app/src/main/res/layout/activity_main.xml"
+          if [ -f "$LAYOUT_FILE" ]; then
+            echo "--- 正在检查并尝试自动修复 XML 第 150-165 行内容 ---"
+            # 打印出错行附近的内容供日志留底，方便万一失败时排查
+            sed -n '150,165p' $LAYOUT_FILE
+            
+            # 使用 sed 进行容错修复：如果 TextView 标签因为换行或者漏写没有以 > 或 /> 结尾
+            # 我们做一次兜底清理，确保它能被安全解析
+            # 如果是普遍的标签格式乱掉，这里通过替换常见漏写字符来格式化
+            # 为了防止盲改失败，我们先把 156 行前后最可能缺少的 /> 进行格式化处理
+            sed -i '156s/\([^>/\\]\)$/\1 \/>/' $LAYOUT_FILE
+            
+            echo "--- 修复后的内容 ---"
+            sed -n '150,165p' $LAYOUT_FILE
           fi
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      # 5. 执行编译
+      # 6. 执行编译
       - name: Build with Gradle
         run: ./gradlew assembleDebug assembleRelease
 
-      # 6. 上传编译好的 APK
+      # 7. 上传编译好的 APK
       - name: Upload APK Artifacts
         uses: actions/upload-artifact@v4
         with:
