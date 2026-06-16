@@ -45,23 +45,19 @@ jobs:
             sed -i '/dependencies {/a \    implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.jar"))))' app/build.gradle.kts
           fi
 
-      # 5. 核心修复：修复 activity_main.xml 第 156 行附近 TextView 标签不闭合或缺属性的语法错误
-      - name: Fix XML Syntax Error in activity_main.xml
+      # 5. 外科手术式修复：精准定位该多行 TextView 的最后一行属性并妥善闭合
+      - name: Fix XML End Tag Precisely
         run: |
           LAYOUT_FILE="app/src/main/res/layout/activity_main.xml"
           if [ -f "$LAYOUT_FILE" ]; then
-            echo "--- 正在检查并尝试自动修复 XML 第 150-165 行内容 ---"
-            # 打印出错行附近的内容供日志留底，方便万一失败时排查
-            sed -n '150,165p' $LAYOUT_FILE
+            echo "--- 精准修复前 160-167 行内容 ---"
+            sed -n '160,167p' $LAYOUT_FILE
             
-            # 使用 sed 进行容错修复：如果 TextView 标签因为换行或者漏写没有以 > 或 /> 结尾
-            # 我们做一次兜底清理，确保它能被安全解析
-            # 如果是普遍的标签格式乱掉，这里通过替换常见漏写字符来格式化
-            # 为了防止盲改失败，我们先把 156 行前后最可能缺少的 /> 进行格式化处理
-            sed -i '156s/\([^>/\\]\)$/\1 \/>/' $LAYOUT_FILE
+            # 找到 app:layout_constraintEnd_toEndOf="parent" 这一行，将其替换为规范闭合的 parent" />
+            sed -i 's/layout_constraintEnd_toEndOf="parent"/layout_constraintEnd_toEndOf="parent" \/>/g' $LAYOUT_FILE
             
-            echo "--- 修复后的内容 ---"
-            sed -n '150,165p' $LAYOUT_FILE
+            echo "--- 精准修复后 160-167 行内容 ---"
+            sed -n '160,167p' $LAYOUT_FILE
           fi
 
       - name: Grant execute permission for gradlew
