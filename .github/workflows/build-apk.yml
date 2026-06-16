@@ -1,153 +1,435 @@
-name: Build CastTV APK
-
-on:
-  workflow_dispatch:
-  push:
-    branches: [ "main", "master" ]
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: set up JDK 17
-        uses: actions/setup-java@v4
-        with:
-          java-version: '17'
-          distribution: 'temurin'
-          cache: gradle
-
-      # 1. 自动补全“启动钥匙”
-      - name: Regenerate Gradle Wrapper
-        run: gradle wrapper --gradle-version 8.5
-
-      # 2. 强行注入 AndroidX 全局开关
-      - name: Enable AndroidX in gradle.properties
-        run: |
-          echo "android.useAndroidX=true" >> gradle.properties
-          echo "android.enableJetifier=true" >> gradle.properties
-
-      # 3. 稳健修复：使用不拦截的公共中心下载真实的 `.jar` 文件
-      - name: Download Cling Jars Securely
-        run: |
-          mkdir -p app/libs
-          curl -L -A "Mozilla/5.0" -o app/libs/cling-core-2.1.2.jar https://plugins.gradle.org/m2/org/fourthline/cling/cling-core/2.1.2/cling-core-2.1.2.jar
-          curl -L -A "Mozilla/5.0" -o app/libs/cling-support-2.1.2.jar https://plugins.gradle.org/m2/org/fourthline/cling/cling-support/2.1.2/cling-support-2.1.2.jar
-          
-          echo "--- 检查下载的本地依赖依赖包大小 ---"
-          ls -lh app/libs/
-          
-          if [ $(stat -c%s "app/libs/cling-core-2.1.2.jar") -lt 10000 ]; then
-            echo "触发备用节点下载..."
-            curl -L -o app/libs/cling-core-2.1.2.jar https://maven.aliyun.com/repository/public/org/fourthline/cling/cling-core/2.1.2/cling-core-2.1.2.jar
-            curl -L -o app/libs/cling-support-2.1.2.jar https://maven.aliyun.com/repository/public/org/fourthline/cling/cling-support/2.1.2/cling-support-2.1.2.jar
-            ls -lh app/libs/
-          fi
-
-      # 4. 强制项目依赖本地整个 libs 目录下的有效 Jar 包
-      - name: Patch Build Gradle to use Local Jars
-        run: |
-          if [ -f "app/build.gradle.kts" ]; then
-            sed -i '/org.fourthline.cling/d' app/build.gradle.kts
-            sed -i '/dependencies {/a \    implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.jar"))))' app/build.gradle.kts
-          fi
-
-      # 5. 覆盖并生成结构绝对合规的 activity_main.xml
-      - name: Re-write activity_main.xml perfectly
-        run: |
-          LAYOUT_FILE="app/src/main/res/layout/activity_main.xml"
-          mkdir -p app/src/main/res/layout
-          
-          cat << 'EOF' > $LAYOUT_FILE
-          <?xml version="1.0" encoding="utf-8"?>
-          <androidx.constraintlayout.widget.ConstraintLayout 
-              xmlns:android="http://schemas.android.com/apk/res/android"
-              xmlns:app="http://schemas.android.com/apk/res-auto"
-              android:layout_width="match_parent"
-              android:layout_height="match_parent"
-              android:background="#F5F5F7">
-
-              <TextView
-                  android:id="@+id/tvTitle"
-                  android:layout_width="wrap_content"
-                  android:layout_height="wrap_content"
-                  android:text="红果短剧投屏助手"
-                  android:textSize="20sp"
-                  android:textStyle="bold"
-                  android:textColor="#333333"
-                  android:layout_marginTop="28dp"
-                  app:layout_constraintTop_toTopOf="parent"
-                  app:layout_constraintStart_toStartOf="parent"
-                  app:layout_constraintEnd_toEndOf="parent" />
-
-              <Button
-                  android:id="@+id/btnStartService"
-                  android:layout_width="0dp"
-                  android:layout_height="wrap_content"
-                  android:text="启动监听服务"
-                  android:layout_marginHorizontal="32dp"
-                  android:layout_marginTop="32dp"
-                  app:layout_constraintTop_toBottomOf="@id/tvTitle"
-                  app:layout_constraintStart_toStartOf="parent"
-                  app:layout_constraintEnd_toEndOf="parent" />
-
-              <Button
-                  android:id="@+id/btnScanDevices"
-                  android:layout_width="0dp"
-                  android:layout_height="wrap_content"
-                  android:text="扫描电视设备"
-                  android:layout_marginHorizontal="32dp"
-                  android:layout_marginTop="16dp"
-                  app:layout_constraintTop_toBottomOf="@id/btnStartService"
-                  app:layout_constraintStart_toStartOf="parent"
-                  app:layout_constraintEnd_toEndOf="parent" />
-
-              <Button
-                  android:id="@+id/btnStopCast"
-                  android:layout_width="0dp"
-                  android:layout_height="wrap_content"
-                  android:text="停止投屏"
-                  android:layout_marginHorizontal="32dp"
-                  android:layout_marginTop="16dp"
-                  app:layout_constraintTop_toBottomOf="@id/btnScanDevices"
-                  app:layout_constraintStart_toStartOf="parent"
-                  app:layout_constraintEnd_toEndOf="parent" />
-
-              <TextView
-                  android:id="@+id/tvInstructions"
-                  android:layout_width="0dp"
-                  android:layout_height="wrap_content"
-                  android:text="使用说明：\n1. 点击&quot;启动监听服务&quot;\n2. 打开红果短剧播放视频\n3. 自动提取视频URL后点击&quot;扫描设备&quot;\n4. 选择电视设备并开始投屏"
-                  android:textSize="13sp"
-                  android:textColor="#666666"
-                  android:lineSpacingMultiplier="1.3"
-                  android:padding="16dp"
-                  android:layout_marginHorizontal="32dp"
-                  android:layout_marginTop="24dp"
-                  app:layout_constraintTop_toBottomOf="@id/btnStopCast"
-                  app:layout_constraintStart_toStartOf="parent"
-                  app:layout_constraintEnd_toEndOf="parent"
-                  app:layout_constraintBottom_toBottomOf="parent" />
-
-          </androidx.constraintlayout.widget.ConstraintLayout>
-          EOF
-          echo "--- 智能完美复写完成 ---"
-
-      - name: Grant execute permission for gradlew
-        run: chmod +x gradlew
-
-      # 6. 执行正式编译打包
-      - name: Build with Gradle
-        run: ./gradlew assembleDebug assembleRelease
-
-      # 7. 上传真实的最终生产 APK 文件
-      - name: Upload APK Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: CastTV-DLNA-APKs
-          path: |
-            app/build/outputs/apk/debug/*.apk
-            app/build/outputs/apk/release/*.apk
+2026-06-16T13:48:47.1004777Z Current runner version: '2.335.1'
+2026-06-16T13:48:47.1030903Z ##[group]Runner Image Provisioner
+2026-06-16T13:48:47.1031761Z Hosted Compute Agent
+2026-06-16T13:48:47.1032367Z Version: 20260527.539
+2026-06-16T13:48:47.1033140Z Commit: a891dd388383b896fa6ac04a82c0b75cec981078
+2026-06-16T13:48:47.1033891Z Build Date: 2026-05-27T21:39:57Z
+2026-06-16T13:48:47.1034625Z Worker ID: {98d0411e-e18a-40f2-9688-01b75c55b09a}
+2026-06-16T13:48:47.1035378Z Azure Region: eastus
+2026-06-16T13:48:47.1035978Z ##[endgroup]
+2026-06-16T13:48:47.1038286Z ##[group]Operating System
+2026-06-16T13:48:47.1038960Z Ubuntu
+2026-06-16T13:48:47.1039494Z 24.04.4
+2026-06-16T13:48:47.1040189Z LTS
+2026-06-16T13:48:47.1041170Z ##[endgroup]
+2026-06-16T13:48:47.1041825Z ##[group]Runner Image
+2026-06-16T13:48:47.1042455Z Image: ubuntu-24.04
+2026-06-16T13:48:47.1043011Z Version: 20260607.184.1
+2026-06-16T13:48:47.1044805Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260607.184/images/ubuntu/Ubuntu2404-Readme.md
+2026-06-16T13:48:47.1046451Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260607.184
+2026-06-16T13:48:47.1047429Z ##[endgroup]
+2026-06-16T13:48:47.1048715Z ##[group]GITHUB_TOKEN Permissions
+2026-06-16T13:48:47.1051328Z Contents: read
+2026-06-16T13:48:47.1051984Z Metadata: read
+2026-06-16T13:48:47.1053129Z Packages: read
+2026-06-16T13:48:47.1053722Z ##[endgroup]
+2026-06-16T13:48:47.1056337Z Secret source: Actions
+2026-06-16T13:48:47.1057276Z Prepare workflow directory
+2026-06-16T13:48:47.1384596Z Prepare all required actions
+2026-06-16T13:48:47.1422841Z Getting action download info
+2026-06-16T13:48:47.5659819Z Download action repository 'actions/checkout@v4' (SHA:34e114876b0b11c390a56381ad16ebd13914f8d5)
+2026-06-16T13:48:47.6343087Z Download action repository 'actions/setup-java@v4' (SHA:c1e323688fd81a25caa38c78aa6df2d33d3e20d9)
+2026-06-16T13:48:47.9333509Z Download action repository 'actions/upload-artifact@v4' (SHA:ea165f8d65b6e75b540449e92b4886f43607fa02)
+2026-06-16T13:48:48.1535652Z Complete job name: build
+2026-06-16T13:48:48.2320053Z ##[group]Run actions/checkout@v4
+2026-06-16T13:48:48.2321258Z with:
+2026-06-16T13:48:48.2321760Z   repository: Sliccic/CastTV-DLNA
+2026-06-16T13:48:48.2326423Z   token: ***
+2026-06-16T13:48:48.2326908Z   ssh-strict: true
+2026-06-16T13:48:48.2327389Z   ssh-user: git
+2026-06-16T13:48:48.2327874Z   persist-credentials: true
+2026-06-16T13:48:48.2328398Z   clean: true
+2026-06-16T13:48:48.2328889Z   sparse-checkout-cone-mode: true
+2026-06-16T13:48:48.2329446Z   fetch-depth: 1
+2026-06-16T13:48:48.2329921Z   fetch-tags: false
+2026-06-16T13:48:48.2330550Z   show-progress: true
+2026-06-16T13:48:48.2331037Z   lfs: false
+2026-06-16T13:48:48.2331481Z   submodules: false
+2026-06-16T13:48:48.2331965Z   set-safe-directory: true
+2026-06-16T13:48:48.2332675Z ##[endgroup]
+2026-06-16T13:48:48.3487999Z Syncing repository: Sliccic/CastTV-DLNA
+2026-06-16T13:48:48.3490067Z ##[group]Getting Git version info
+2026-06-16T13:48:48.3491338Z Working directory is '/home/runner/work/CastTV-DLNA/CastTV-DLNA'
+2026-06-16T13:48:48.3492669Z [command]/usr/bin/git version
+2026-06-16T13:48:48.3528946Z git version 2.54.0
+2026-06-16T13:48:48.3554500Z ##[endgroup]
+2026-06-16T13:48:48.3578303Z Temporarily overriding HOME='/home/runner/work/_temp/f91f76f5-34b9-4e5f-b4d0-f7dfc940f276' before making global git config changes
+2026-06-16T13:48:48.3581222Z Adding repository directory to the temporary git global config as a safe directory
+2026-06-16T13:48:48.3584600Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/CastTV-DLNA/CastTV-DLNA
+2026-06-16T13:48:48.3627581Z Deleting the contents of '/home/runner/work/CastTV-DLNA/CastTV-DLNA'
+2026-06-16T13:48:48.3631292Z ##[group]Initializing the repository
+2026-06-16T13:48:48.3635303Z [command]/usr/bin/git init /home/runner/work/CastTV-DLNA/CastTV-DLNA
+2026-06-16T13:48:48.3703162Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-06-16T13:48:48.3705003Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-06-16T13:48:48.3707047Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-06-16T13:48:48.3708395Z hint: call:
+2026-06-16T13:48:48.3708846Z hint:
+2026-06-16T13:48:48.3709434Z hint: 	git config --global init.defaultBranch <name>
+2026-06-16T13:48:48.3710145Z hint:
+2026-06-16T13:48:48.3711123Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-06-16T13:48:48.3712168Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-06-16T13:48:48.3713366Z hint:
+2026-06-16T13:48:48.3713845Z hint: 	git branch -m <name>
+2026-06-16T13:48:48.3714397Z hint:
+2026-06-16T13:48:48.3715095Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-06-16T13:48:48.3716325Z Initialized empty Git repository in /home/runner/work/CastTV-DLNA/CastTV-DLNA/.git/
+2026-06-16T13:48:48.3718642Z [command]/usr/bin/git remote add origin https://github.com/Sliccic/CastTV-DLNA
+2026-06-16T13:48:48.3755621Z ##[endgroup]
+2026-06-16T13:48:48.3756497Z ##[group]Disabling automatic garbage collection
+2026-06-16T13:48:48.3761132Z [command]/usr/bin/git config --local gc.auto 0
+2026-06-16T13:48:48.3790745Z ##[endgroup]
+2026-06-16T13:48:48.3791985Z ##[group]Setting up auth
+2026-06-16T13:48:48.3796848Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-06-16T13:48:48.3830967Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-06-16T13:48:48.4140842Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-06-16T13:48:48.4171956Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-06-16T13:48:48.4409730Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-06-16T13:48:48.4443855Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-06-16T13:48:48.4678827Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-06-16T13:48:48.4715369Z ##[endgroup]
+2026-06-16T13:48:48.4716804Z ##[group]Fetching the repository
+2026-06-16T13:48:48.4725543Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +abd276bff9bce1bde0e888e2b984abb8d460c2d5:refs/remotes/origin/main
+2026-06-16T13:48:48.7159611Z From https://github.com/Sliccic/CastTV-DLNA
+2026-06-16T13:48:48.7161083Z  * [new ref]         abd276bff9bce1bde0e888e2b984abb8d460c2d5 -> origin/main
+2026-06-16T13:48:48.7194321Z ##[endgroup]
+2026-06-16T13:48:48.7195853Z ##[group]Determining the checkout info
+2026-06-16T13:48:48.7197310Z ##[endgroup]
+2026-06-16T13:48:48.7201292Z [command]/usr/bin/git sparse-checkout disable
+2026-06-16T13:48:48.7245294Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-06-16T13:48:48.7272643Z ##[group]Checking out the ref
+2026-06-16T13:48:48.7275685Z [command]/usr/bin/git checkout --progress --force -B main refs/remotes/origin/main
+2026-06-16T13:48:48.7342711Z Switched to a new branch 'main'
+2026-06-16T13:48:48.7344963Z branch 'main' set up to track 'origin/main'.
+2026-06-16T13:48:48.7352786Z ##[endgroup]
+2026-06-16T13:48:48.7391439Z [command]/usr/bin/git log -1 --format=%H
+2026-06-16T13:48:48.7415724Z abd276bff9bce1bde0e888e2b984abb8d460c2d5
+2026-06-16T13:48:48.7883516Z ##[group]Run actions/setup-java@v4
+2026-06-16T13:48:48.7884696Z with:
+2026-06-16T13:48:48.7885562Z   java-version: 17
+2026-06-16T13:48:48.7886516Z   distribution: temurin
+2026-06-16T13:48:48.7887491Z   cache: gradle
+2026-06-16T13:48:48.7888408Z   java-package: jdk
+2026-06-16T13:48:48.7889365Z   check-latest: false
+2026-06-16T13:48:48.7890335Z   server-id: github
+2026-06-16T13:48:48.7891667Z   server-username: GITHUB_ACTOR
+2026-06-16T13:48:48.7892808Z   server-password: GITHUB_TOKEN
+2026-06-16T13:48:48.7893949Z   overwrite-settings: true
+2026-06-16T13:48:48.7895000Z   job-status: success
+2026-06-16T13:48:48.7905290Z   token: ***
+2026-06-16T13:48:48.7906190Z ##[endgroup]
+2026-06-16T13:48:49.0022554Z ##[group]Installed distributions
+2026-06-16T13:48:49.0074000Z Resolved Java 17.0.19+10 from tool-cache
+2026-06-16T13:48:49.0075485Z Setting Java 17.0.19+10 as the default
+2026-06-16T13:48:49.0087809Z Creating toolchains.xml for JDK version 17 from temurin
+2026-06-16T13:48:49.0163483Z Writing to /home/runner/.m2/toolchains.xml
+2026-06-16T13:48:49.0164535Z 
+2026-06-16T13:48:49.0164942Z Java configuration:
+2026-06-16T13:48:49.0166161Z   Distribution: temurin
+2026-06-16T13:48:49.0167392Z   Version: 17.0.19+10
+2026-06-16T13:48:49.0168841Z   Path: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.19-10/x64
+2026-06-16T13:48:49.0170059Z 
+2026-06-16T13:48:49.0171579Z ##[endgroup]
+2026-06-16T13:48:49.0192360Z Creating settings.xml with server-id: github
+2026-06-16T13:48:49.0204863Z Writing to /home/runner/.m2/settings.xml
+2026-06-16T13:48:49.2239024Z gradle cache is not found
+2026-06-16T13:48:49.2420653Z ##[group]Run gradle wrapper --gradle-version 8.5
+2026-06-16T13:48:49.2422232Z [36;1mgradle wrapper --gradle-version 8.5[0m
+2026-06-16T13:48:49.2562728Z shell: /usr/bin/bash -e {0}
+2026-06-16T13:48:49.2563809Z env:
+2026-06-16T13:48:49.2565043Z   JAVA_HOME: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.19-10/x64
+2026-06-16T13:48:49.2567103Z   JAVA_HOME_17_X64: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.19-10/x64
+2026-06-16T13:48:49.2568729Z ##[endgroup]
+2026-06-16T13:48:58.5113270Z 
+2026-06-16T13:48:58.5126237Z Welcome to Gradle 9.5.1!
+2026-06-16T13:48:58.5127077Z 
+2026-06-16T13:48:58.5127603Z Here are the highlights of this release:
+2026-06-16T13:48:58.5128423Z  - Task provenance in reports and failure messages
+2026-06-16T13:48:58.5129564Z  - Type-safe accessors for precompiled Kotlin Settings plugins
+2026-06-16T13:48:58.5130312Z 
+2026-06-16T13:48:58.5131178Z For more details see https://docs.gradle.org/9.5.1/release-notes.html
+2026-06-16T13:48:58.5131874Z 
+2026-06-16T13:48:59.5853258Z Starting a Gradle Daemon (subsequent builds will be faster)
+2026-06-16T13:50:21.0882473Z > Task :wrapper
+2026-06-16T13:50:21.1917599Z 
+2026-06-16T13:50:21.1924438Z [Incubating] Problems report is available at: file:///home/runner/work/CastTV-DLNA/CastTV-DLNA/build/reports/problems/problems-report.html
+2026-06-16T13:50:21.1925617Z 
+2026-06-16T13:50:21.1926381Z Deprecated Gradle features were used in this build, making it incompatible with Gradle 10.
+2026-06-16T13:50:21.1927158Z 
+2026-06-16T13:50:21.1934291Z You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+2026-06-16T13:50:21.1935427Z 
+2026-06-16T13:50:21.1936614Z For more on this, please refer to https://docs.gradle.org/9.5.1/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+2026-06-16T13:50:21.1951438Z 
+2026-06-16T13:50:21.1952044Z BUILD SUCCESSFUL in 1m 30s
+2026-06-16T13:50:21.1952548Z 1 actionable task: 1 executed
+2026-06-16T13:50:21.1953609Z Consider enabling configuration cache to speed up this build: https://docs.gradle.org/9.5.1/userguide/configuration_cache_enabling.html
+2026-06-16T13:50:21.5768116Z ##[group]Run echo "android.useAndroidX=true" >> gradle.properties
+2026-06-16T13:50:21.5768676Z [36;1mecho "android.useAndroidX=true" >> gradle.properties[0m
+2026-06-16T13:50:21.5769133Z [36;1mecho "android.enableJetifier=true" >> gradle.properties[0m
+2026-06-16T13:50:21.5804222Z shell: /usr/bin/bash -e {0}
+2026-06-16T13:50:21.5804514Z env:
+2026-06-16T13:50:21.5804838Z   JAVA_HOME: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.19-10/x64
+2026-06-16T13:50:21.5805388Z   JAVA_HOME_17_X64: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.19-10/x64
+2026-06-16T13:50:21.5805786Z ##[endgroup]
+2026-06-16T13:50:21.5896135Z ##[group]Run mkdir -p app/libs
+2026-06-16T13:50:21.5896498Z [36;1mmkdir -p app/libs[0m
+2026-06-16T13:50:21.5897166Z [36;1mcurl -L -A "Mozilla/5.0" -o app/libs/cling-core-2.1.2.jar https://plugins.gradle.org/m2/org/fourthline/cling/cling-core/2.1.2/cling-core-2.1.2.jar[0m
+2026-06-16T13:50:21.5898220Z [36;1mcurl -L -A "Mozilla/5.0" -o app/libs/cling-support-2.1.2.jar https://plugins.gradle.org/m2/org/fourthline/cling/cling-support/2.1.2/cling-support-2.1.2.jar[0m
+2026-06-16T13:50:21.5898887Z [36;1m[0m
+2026-06-16T13:50:21.5899137Z [36;1mecho "--- 检查下载的本地依赖依赖包大小 ---"[0m
+2026-06-16T13:50:21.5899438Z [36;1mls -lh app/libs/[0m
+2026-06-16T13:50:21.5899681Z [36;1m[0m
+2026-06-16T13:50:21.5900024Z [36;1mif [ $(stat -c%s "app/libs/cling-core-2.1.2.jar") -lt 10000 ]; then[0m
+2026-06-16T13:50:21.5900616Z [36;1m  echo "触发备用节点下载..."[0m
+2026-06-16T13:50:21.5901318Z [36;1m  curl -L -o app/libs/cling-core-2.1.2.jar https://maven.aliyun.com/repository/public/org/fourthline/cling/cling-core/2.1.2/cling-core-2.1.2.jar[0m
+2026-06-16T13:50:21.5902358Z [36;1m  curl -L -o app/libs/cling-support-2.1.2.jar https://maven.aliyun.com/repository/public/org/fourthline/cling/cling-support/2.1.2/cling-support-2.1.2.jar[0m
+2026-06-16T13:50:21.5903045Z [36;1m  ls -lh app/libs/[0m
+2026-06-16T13:50:21.5903294Z [36;1mfi[0m
+2026-06-16T13:50:21.5936010Z shell: /usr/bin/bash -e {0}
+2026-06-16T13:50:21.5936303Z env:
+2026-06-16T13:50:21.5936640Z   JAVA_HOME: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.19-10/x64
+2026-06-16T13:50:21.5937164Z   JAVA_HOME_17_X64: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.19-10/x64
+2026-06-16T13:50:21.5937562Z ##[endgroup]
+2026-06-16T13:50:21.6059804Z   % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+2026-06-16T13:50:21.6060922Z                                  Dload  Upload   Total   Spent    Left  Speed
+2026-06-16T13:50:21.6061328Z 
+2026-06-16T13:50:21.6653003Z   0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+2026-06-16T13:50:21.6653987Z   0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+2026-06-16T13:50:21.7194080Z 
+2026-06-16T13:50:21.7195090Z 100   554    0   554    0     0   4879      0 --:--:-- --:--:-- --:--:--  4879
+2026-06-16T13:50:21.7285855Z   % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+2026-06-16T13:50:21.7286709Z                                  Dload  Upload   Total   Spent    Left  Speed
+2026-06-16T13:50:21.7287263Z 
+2026-06-16T13:50:21.7569298Z   0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+2026-06-16T13:50:21.8149952Z   0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+2026-06-16T13:50:21.8150745Z   0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+2026-06-16T13:50:21.8686980Z 
+2026-06-16T13:50:21.8687646Z 100   554    0   554    0     0   3950      0 --:--:-- --:--:-- --:--:--  3950
+2026-06-16T13:50:21.8724153Z --- 检查下载的本地依赖依赖包大小 ---
+2026-06-16T13:50:21.8741150Z total 8.0K
+2026-06-16T13:50:21.8749313Z -rw-r--r-- 1 runner runner 554 Jun 16 13:50 cling-core-2.1.2.jar
+2026-06-16T13:50:21.8749989Z -rw-r--r-- 1 runner runner 554 Jun 16 13:50 cling-support-2.1.2.jar
+2026-06-16T13:50:21.8761493Z 触发备用节点下载...
+2026-06-16T13:50:21.8816201Z   % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+2026-06-16T13:50:21.8817301Z                                  Dload  Upload   Total   Spent    Left  Speed
+2026-06-16T13:50:21.8818353Z 
+2026-06-16T13:50:22.7603991Z   0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+2026-06-16T13:50:23.0646819Z   0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+2026-06-16T13:50:23.0647501Z 100   689    0   689    0     0    582      0 --:--:--  0:00:01 --:--:--   582
+2026-06-16T13:50:23.0727407Z   % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+2026-06-16T13:50:23.0728637Z                                  Dload  Upload   Total   Spent    Left  Speed
+2026-06-16T13:50:23.0729247Z 
+2026-06-16T13:50:24.0169106Z   0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+2026-06-16T13:50:24.0169778Z 100   689    0   689    0     0    729      0 --:--:-- --:--:-- --:--:--   729
+2026-06-16T13:50:24.0170877Z 100   689    0   689    0     0    729      0 --:--:-- --:--:-- --:--:--   729
+2026-06-16T13:50:24.0211480Z total 8.0K
+2026-06-16T13:50:24.0211996Z -rw-r--r-- 1 runner runner 689 Jun 16 13:50 cling-core-2.1.2.jar
+2026-06-16T13:50:24.0212602Z -rw-r--r-- 1 runner runner 689 Jun 16 13:50 cling-support-2.1.2.jar
+2026-06-16T13:50:24.0243214Z ##[group]Run if [ -f "app/build.gradle.kts" ]; then
+2026-06-16T13:50:24.0243629Z [36;1mif [ -f "app/build.gradle.kts" ]; then[0m
+2026-06-16T13:50:24.0244015Z [36;1m  sed -i '/org.fourthline.cling/d' app/build.gradle.kts[0m
+2026-06-16T13:50:24.0244661Z [36;1m  sed -i '/dependencies {/a \    implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.jar"))))' app/build.gradle.kts[0m
+2026-06-16T13:50:24.0245244Z [36;1mfi[0m
+2026-06-16T13:50:24.0278091Z shell: /usr/bin/bash -e {0}
+2026-06-16T13:50:24.0278361Z env:
+2026-06-16T13:50:24.0278687Z   JAVA_HOME: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.19-10/x64
+2026-06-16T13:50:24.0279203Z   JAVA_HOME_17_X64: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.19-10/x64
+2026-06-16T13:50:24.0279599Z ##[endgroup]
+2026-06-16T13:50:24.0393259Z ##[group]Run LAYOUT_FILE="app/src/main/res/layout/activity_main.xml"
+2026-06-16T13:50:24.0393816Z [36;1mLAYOUT_FILE="app/src/main/res/layout/activity_main.xml"[0m
+2026-06-16T13:50:24.0394196Z [36;1mmkdir -p app/src/main/res/layout[0m
+2026-06-16T13:50:24.0394487Z [36;1m[0m
+2026-06-16T13:50:24.0394707Z [36;1mcat << 'EOF' > $LAYOUT_FILE[0m
+2026-06-16T13:50:24.0395022Z [36;1m<?xml version="1.0" encoding="utf-8"?>[0m
+2026-06-16T13:50:24.0395434Z [36;1m<androidx.constraintlayout.widget.ConstraintLayout [0m
+2026-06-16T13:50:24.0395900Z [36;1m    xmlns:android="http://schemas.android.com/apk/res/android"[0m
+2026-06-16T13:50:24.0396359Z [36;1m    xmlns:app="http://schemas.android.com/apk/res-auto"[0m
+2026-06-16T13:50:24.0396723Z [36;1m    android:layout_width="match_parent"[0m
+2026-06-16T13:50:24.0397056Z [36;1m    android:layout_height="match_parent"[0m
+2026-06-16T13:50:24.0397375Z [36;1m    android:background="#F5F5F7">[0m
+2026-06-16T13:50:24.0397658Z [36;1m[0m
+2026-06-16T13:50:24.0397886Z [36;1m    <TextView[0m
+2026-06-16T13:50:24.0398138Z [36;1m        android:id="@+id/tvTitle"[0m
+2026-06-16T13:50:24.0398441Z [36;1m        android:layout_width="wrap_content"[0m
+2026-06-16T13:50:24.0398772Z [36;1m        android:layout_height="wrap_content"[0m
+2026-06-16T13:50:24.0399098Z [36;1m        android:text="红果短剧投屏助手"[0m
+2026-06-16T13:50:24.0399386Z [36;1m        android:textSize="20sp"[0m
+2026-06-16T13:50:24.0399667Z [36;1m        android:textStyle="bold"[0m
+2026-06-16T13:50:24.0399962Z [36;1m        android:textColor="#333333"[0m
+2026-06-16T13:50:24.0400280Z [36;1m        android:layout_marginTop="28dp"[0m
+2026-06-16T13:50:24.0400843Z [36;1m        app:layout_constraintTop_toTopOf="parent"[0m
+2026-06-16T13:50:24.0401220Z [36;1m        app:layout_constraintStart_toStartOf="parent"[0m
+2026-06-16T13:50:24.0401595Z [36;1m        app:layout_constraintEnd_toEndOf="parent" />[0m
+2026-06-16T13:50:24.0401911Z [36;1m[0m
+2026-06-16T13:50:24.0402120Z [36;1m    <Button[0m
+2026-06-16T13:50:24.0402384Z [36;1m        android:id="@+id/btnStartService"[0m
+2026-06-16T13:50:24.0402703Z [36;1m        android:layout_width="0dp"[0m
+2026-06-16T13:50:24.0403019Z [36;1m        android:layout_height="wrap_content"[0m
+2026-06-16T13:50:24.0403329Z [36;1m        android:text="启动监听服务"[0m
+2026-06-16T13:50:24.0403641Z [36;1m        android:layout_marginHorizontal="32dp"[0m
+2026-06-16T13:50:24.0403972Z [36;1m        android:layout_marginTop="32dp"[0m
+2026-06-16T13:50:24.0404331Z [36;1m        app:layout_constraintTop_toBottomOf="@id/tvTitle"[0m
+2026-06-16T13:50:24.0404724Z [36;1m        app:layout_constraintStart_toStartOf="parent"[0m
+2026-06-16T13:50:24.0405275Z [36;1m        app:layout_constraintEnd_toEndOf="parent" />[0m
+2026-06-16T13:50:24.0405587Z [36;1m[0m
+2026-06-16T13:50:24.0405781Z [36;1m    <Button[0m
+2026-06-16T13:50:24.0406031Z [36;1m        android:id="@+id/btnScanDevices"[0m
+2026-06-16T13:50:24.0406357Z [36;1m        android:layout_width="0dp"[0m
+2026-06-16T13:50:24.0406677Z [36;1m        android:layout_height="wrap_content"[0m
+2026-06-16T13:50:24.0406989Z [36;1m        android:text="扫描电视设备"[0m
+2026-06-16T13:50:24.0407305Z [36;1m        android:layout_marginHorizontal="32dp"[0m
+2026-06-16T13:50:24.0407637Z [36;1m        android:layout_marginTop="16dp"[0m
+2026-06-16T13:50:24.0408033Z [36;1m        app:layout_constraintTop_toBottomOf="@id/btnStartService"[0m
+2026-06-16T13:50:24.0408465Z [36;1m        app:layout_constraintStart_toStartOf="parent"[0m
+2026-06-16T13:50:24.0408843Z [36;1m        app:layout_constraintEnd_toEndOf="parent" />[0m
+2026-06-16T13:50:24.0409160Z [36;1m[0m
+2026-06-16T13:50:24.0409361Z [36;1m    <Button[0m
+2026-06-16T13:50:24.0409732Z [36;1m        android:id="@+id/btnStopCast"[0m
+2026-06-16T13:50:24.0410078Z [36;1m        android:layout_width="0dp"[0m
+2026-06-16T13:50:24.0410580Z [36;1m        android:layout_height="wrap_content"[0m
+2026-06-16T13:50:24.0410896Z [36;1m        android:text="停止投屏"[0m
+2026-06-16T13:50:24.0411415Z [36;1m        android:layout_marginHorizontal="32dp"[0m
+2026-06-16T13:50:24.0411748Z [36;1m        android:layout_marginTop="16dp"[0m
+2026-06-16T13:50:24.0412124Z [36;1m        app:layout_constraintTop_toBottomOf="@id/btnScanDevices"[0m
+2026-06-16T13:50:24.0412556Z [36;1m        app:layout_constraintStart_toStartOf="parent"[0m
+2026-06-16T13:50:24.0412931Z [36;1m        app:layout_constraintEnd_toEndOf="parent" />[0m
+2026-06-16T13:50:24.0413237Z [36;1m[0m
+2026-06-16T13:50:24.0413436Z [36;1m    <TextView[0m
+2026-06-16T13:50:24.0413694Z [36;1m        android:id="@+id/tvInstructions"[0m
+2026-06-16T13:50:24.0414013Z [36;1m        android:layout_width="0dp"[0m
+2026-06-16T13:50:24.0414318Z [36;1m        android:layout_height="wrap_content"[0m
+2026-06-16T13:50:24.0414886Z [36;1m        android:text="使用说明：\n1. 点击&quot;启动监听服务&quot;\n2. 打开红果短剧播放视频\n3. 自动提取视频URL后点击&quot;扫描设备&quot;\n4. 选择电视设备并开始投屏"[0m
+2026-06-16T13:50:24.0415432Z [36;1m        android:textSize="13sp"[0m
+2026-06-16T13:50:24.0415743Z [36;1m        android:textColor="#666666"[0m
+2026-06-16T13:50:24.0416065Z [36;1m        android:lineSpacingMultiplier="1.3"[0m
+2026-06-16T13:50:24.0416381Z [36;1m        android:padding="16dp"[0m
+2026-06-16T13:50:24.0416693Z [36;1m        android:layout_marginHorizontal="32dp"[0m
+2026-06-16T13:50:24.0417022Z [36;1m        android:layout_marginTop="24dp"[0m
+2026-06-16T13:50:24.0417390Z [36;1m        app:layout_constraintTop_toBottomOf="@id/btnStopCast"[0m
+2026-06-16T13:50:24.0417798Z [36;1m        app:layout_constraintStart_toStartOf="parent"[0m
+2026-06-16T13:50:24.0418166Z [36;1m        app:layout_constraintEnd_toEndOf="parent"[0m
+2026-06-16T13:50:24.0418558Z [36;1m        app:layout_constraintBottom_toBottomOf="parent" />[0m
+2026-06-16T13:50:24.0418888Z [36;1m[0m
+2026-06-16T13:50:24.0419184Z [36;1m</androidx.constraintlayout.widget.ConstraintLayout>[0m
+2026-06-16T13:50:24.0419525Z [36;1mEOF[0m
+2026-06-16T13:50:24.0419750Z [36;1mecho "--- 智能完美复写完成 ---"[0m
+2026-06-16T13:50:24.0509239Z shell: /usr/bin/bash -e {0}
+2026-06-16T13:50:24.0509692Z env:
+2026-06-16T13:50:24.0510151Z   JAVA_HOME: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.19-10/x64
+2026-06-16T13:50:24.0511126Z   JAVA_HOME_17_X64: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.19-10/x64
+2026-06-16T13:50:24.0511686Z ##[endgroup]
+2026-06-16T13:50:24.0602038Z --- 智能完美复写完成 ---
+2026-06-16T13:50:24.0628991Z ##[group]Run chmod +x gradlew
+2026-06-16T13:50:24.0629291Z [36;1mchmod +x gradlew[0m
+2026-06-16T13:50:24.0661447Z shell: /usr/bin/bash -e {0}
+2026-06-16T13:50:24.0661711Z env:
+2026-06-16T13:50:24.0662032Z   JAVA_HOME: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.19-10/x64
+2026-06-16T13:50:24.0662741Z   JAVA_HOME_17_X64: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.19-10/x64
+2026-06-16T13:50:24.0663124Z ##[endgroup]
+2026-06-16T13:50:24.0751582Z ##[group]Run ./gradlew assembleDebug assembleRelease
+2026-06-16T13:50:24.0751985Z [36;1m./gradlew assembleDebug assembleRelease[0m
+2026-06-16T13:50:24.0782266Z shell: /usr/bin/bash -e {0}
+2026-06-16T13:50:24.0782544Z env:
+2026-06-16T13:50:24.0782877Z   JAVA_HOME: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.19-10/x64
+2026-06-16T13:50:24.0783388Z   JAVA_HOME_17_X64: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.19-10/x64
+2026-06-16T13:50:24.0783781Z ##[endgroup]
+2026-06-16T13:50:24.1573695Z Fetching distribution.
+2026-06-16T13:50:24.1574203Z Downloading https://services.gradle.org/distributions/gradle-8.5-bin.zip
+2026-06-16T13:50:25.6096877Z ............10%.............20%............30%.............40%.............50%............60%.............70%.............80%............90%.............100%
+2026-06-16T13:50:26.7251601Z 
+2026-06-16T13:50:26.7271826Z Welcome to Gradle 8.5!
+2026-06-16T13:50:26.7297322Z 
+2026-06-16T13:50:26.7321783Z Here are the highlights of this release:
+2026-06-16T13:50:26.7351658Z  - Support for running on Java 21
+2026-06-16T13:50:26.7381527Z  - Faster first use with Kotlin DSL
+2026-06-16T13:50:26.7413845Z  - Improved error and warning messages
+2026-06-16T13:50:26.7441273Z 
+2026-06-16T13:50:26.7452029Z For more details see https://docs.gradle.org/8.5/release-notes.html
+2026-06-16T13:50:26.7452754Z 
+2026-06-16T13:50:26.8221722Z Starting a Gradle Daemon (subsequent builds will be faster)
+2026-06-16T13:51:20.3261911Z > Task :app:preBuild UP-TO-DATE
+2026-06-16T13:51:20.3291469Z > Task :app:preDebugBuild UP-TO-DATE
+2026-06-16T13:51:20.3323619Z > Task :app:mergeDebugNativeDebugMetadata NO-SOURCE
+2026-06-16T13:51:20.3324615Z > Task :app:checkKotlinGradlePluginConfigurationErrors
+2026-06-16T13:51:25.5226307Z > Task :app:dataBindingMergeDependencyArtifactsDebug
+2026-06-16T13:51:25.5241351Z > Task :app:generateDebugResValues
+2026-06-16T13:51:25.5269839Z > Task :app:generateDebugResources
+2026-06-16T13:51:27.5219121Z > Task :app:packageDebugResources
+2026-06-16T13:51:28.5221792Z > Task :app:mergeDebugResources
+2026-06-16T13:51:28.7231819Z > Task :app:parseDebugLocalResources
+2026-06-16T13:51:28.8218361Z > Task :app:checkDebugAarMetadata
+2026-06-16T13:51:29.1241343Z > Task :app:dataBindingGenBaseClassesDebug
+2026-06-16T13:51:29.1242356Z > Task :app:mapDebugSourceSetPaths
+2026-06-16T13:51:29.2225217Z > Task :app:createDebugCompatibleScreenManifests
+2026-06-16T13:51:29.2226092Z > Task :app:extractDeepLinksDebug
+2026-06-16T13:51:29.5232714Z > Task :app:processDebugMainManifest
+2026-06-16T13:51:29.5244953Z > Task :app:processDebugManifest
+2026-06-16T13:51:29.6251576Z > Task :app:javaPreCompileDebug
+2026-06-16T13:51:29.6252400Z > Task :app:mergeDebugShaders
+2026-06-16T13:51:29.6252945Z > Task :app:compileDebugShaders NO-SOURCE
+2026-06-16T13:51:29.6273696Z > Task :app:generateDebugAssets UP-TO-DATE
+2026-06-16T13:51:29.7233729Z > Task :app:mergeDebugAssets
+2026-06-16T13:51:29.7242981Z > Task :app:compressDebugAssets
+2026-06-16T13:51:31.0221888Z > Task :app:desugarDebugFileDependencies FAILED
+2026-06-16T13:51:31.3227976Z 
+2026-06-16T13:51:31.3228544Z > Task :app:checkDebugDuplicateClasses FAILED
+2026-06-16T13:51:31.3232438Z FAILURE: Build completed with 2 failures.
+2026-06-16T13:51:31.3232957Z > Task :app:processDebugManifestForPackage
+2026-06-16T13:51:31.4242320Z 
+2026-06-16T13:51:31.4271946Z 20 actionable tasks: 20 executed
+2026-06-16T13:51:31.4273255Z 1: Task failed with an exception.
+2026-06-16T13:51:31.4301455Z -----------
+2026-06-16T13:51:31.4331955Z * What went wrong:
+2026-06-16T13:51:31.4345848Z Execution failed for task ':app:desugarDebugFileDependencies'.
+2026-06-16T13:51:31.4361672Z > Multiple task action failures occurred:
+2026-06-16T13:51:31.4392116Z    > A failure occurred while executing com.android.build.gradle.internal.tasks.DexFileDependenciesTask$DexFileDependenciesWorkerAction
+2026-06-16T13:51:31.4394030Z       > java.util.zip.ZipException: zip END header not found
+2026-06-16T13:51:31.4452853Z    > A failure occurred while executing com.android.build.gradle.internal.tasks.DexFileDependenciesTask$DexFileDependenciesWorkerAction
+2026-06-16T13:51:31.4454533Z       > java.util.zip.ZipException: zip END header not found
+2026-06-16T13:51:31.4480935Z 
+2026-06-16T13:51:31.4511316Z * Try:
+2026-06-16T13:51:31.4511899Z > Run with --stacktrace option to get the stack trace.
+2026-06-16T13:51:31.4541695Z > Run with --info or --debug option to get more log output.
+2026-06-16T13:51:31.4571576Z > Run with --scan to get full insights.
+2026-06-16T13:51:31.4591480Z > Get more help at https://help.gradle.org.
+2026-06-16T13:51:31.4601397Z ==============================================================================
+2026-06-16T13:51:31.4631008Z 
+2026-06-16T13:51:31.4662331Z 2: Task failed with an exception.
+2026-06-16T13:51:31.4672156Z -----------
+2026-06-16T13:51:31.4701437Z * What went wrong:
+2026-06-16T13:51:31.4721660Z Execution failed for task ':app:checkDebugDuplicateClasses'.
+2026-06-16T13:51:31.4731263Z > Could not resolve all files for configuration ':app:debugRuntimeClasspath'.
+2026-06-16T13:51:31.4748814Z    > Failed to transform cling-core-2.1.2.jar to match attributes {artifactType=enumerated-runtime-classes, org.gradle.libraryelements=jar, org.gradle.usage=java-runtime}.
+2026-06-16T13:51:31.4750801Z       > Execution failed for EnumerateClassesTransform: /home/runner/.gradle/caches/transforms-3/28868494b80e18a83cf27fa96fc92110/transformed/jetified-cling-core-2.1.2.jar.
+2026-06-16T13:51:31.4751923Z          > zip END header not found
+2026-06-16T13:51:31.4752859Z    > Failed to transform cling-support-2.1.2.jar to match attributes {artifactType=enumerated-runtime-classes, org.gradle.libraryelements=jar, org.gradle.usage=java-runtime}.
+2026-06-16T13:51:31.4754100Z       > Execution failed for EnumerateClassesTransform: /home/runner/.gradle/caches/transforms-3/7163c9fe1df0de9dd2b460bfa72dc27a/transformed/jetified-cling-support-2.1.2.jar.
+2026-06-16T13:51:31.4754901Z          > zip END header not found
+2026-06-16T13:51:31.4755089Z 
+2026-06-16T13:51:31.4755174Z * Try:
+2026-06-16T13:51:31.4755456Z > Run with --stacktrace option to get the stack trace.
+2026-06-16T13:51:31.4755852Z > Run with --info or --debug option to get more log output.
+2026-06-16T13:51:31.4756205Z > Run with --scan to get full insights.
+2026-06-16T13:51:31.4756528Z > Get more help at https://help.gradle.org.
+2026-06-16T13:51:31.4756860Z ==============================================================================
+2026-06-16T13:51:31.4757097Z 
+2026-06-16T13:51:31.4757197Z BUILD FAILED in 1m 7s
+2026-06-16T13:51:31.7981676Z ##[error]Process completed with exit code 1.
+2026-06-16T13:51:31.8192745Z Post job cleanup.
+2026-06-16T13:51:32.0453758Z Post job cleanup.
+2026-06-16T13:51:32.1632693Z [command]/usr/bin/git version
+2026-06-16T13:51:32.1675303Z git version 2.54.0
+2026-06-16T13:51:32.1720997Z Temporarily overriding HOME='/home/runner/work/_temp/87c3f5e5-34e4-46f2-8136-1fd3fe5f511c' before making global git config changes
+2026-06-16T13:51:32.1722498Z Adding repository directory to the temporary git global config as a safe directory
+2026-06-16T13:51:32.1741348Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/CastTV-DLNA/CastTV-DLNA
+2026-06-16T13:51:32.1785530Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-06-16T13:51:32.1826187Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-06-16T13:51:32.2078267Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-06-16T13:51:32.2106014Z http.https://github.com/.extraheader
+2026-06-16T13:51:32.2119246Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+2026-06-16T13:51:32.2155918Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-06-16T13:51:32.2410155Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-06-16T13:51:32.2447917Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-06-16T13:51:32.2824335Z Cleaning up orphan processes
+2026-06-16T13:51:32.3239478Z Terminate orphan process: pid (2344) (java)
+2026-06-16T13:51:32.3264338Z Terminate orphan process: pid (2605) (java)
+2026-06-16T13:51:32.3283458Z ##[warning]Node.js 20 actions are deprecated. The following actions are running on Node.js 20 and may not work as expected: actions/checkout@v4, actions/setup-java@v4. Actions will be forced to run with Node.js 24 by default starting June 16th, 2026. Node.js 20 will be removed from the runner on September 16th, 2026. Please check if updated versions of these actions are available that support Node.js 24. To opt into Node.js 24 now, set the FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true environment variable on the runner or in your workflow file. Once Node.js 24 becomes the default, you can temporarily opt out by setting ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
