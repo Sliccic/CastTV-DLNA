@@ -30,19 +30,26 @@ jobs:
           echo "android.useAndroidX=true" >> gradle.properties
           echo "android.enableJetifier=true" >> gradle.properties
 
-      # 3. 核心修复：给项目仓库配置强行追加包含 Cling 依赖的公共快照库 (Bonsai/Jitpack 镜像)
-      # 使用 4thline 倒闭后社区最常用的 4thline 遗产备份源地址
-      - name: Inject Cling Legacy Repository
+      # 3. 核心修复：建立本地 libs 文件夹，绕过崩溃的远端仓库，直接强行下载核心 Cling 依赖包
+      - name: Download Cling Jars to Local Libs
         run: |
-          if [ -f "settings.gradle.kts" ]; then
-            # 如果是现代的 settings.gradle.kts 结构，动态往里面塞入备用 maven 地址
-            sed -i '/mavenCentral()/a \        maven { url = java.net.URI("https://maven.brokenvessel.org/releases") }\n        maven { url = java.net.URI("https://jitpack.io") }' settings.gradle.kts
-          fi
-          if [ -f "build.gradle.kts" ]; then
-            sed -i '/mavenCentral()/a \    maven { url = java.net.URI("https://maven.brokenvessel.org/releases") }\n    maven { url = java.net.URI("https://jitpack.io") }' build.gradle.kts
+          mkdir -p app/libs
+          # 从目前完全可靠的开源镜像源/冷存储节点直接抓取 cling-core 和 cling-support 的 jar 包
+          curl -L -o app/libs/cling-core-2.1.2.jar https://repo.maven.apache.org/maven2/org/fourthline/cling/cling-core/2.1.2/cling-core-2.1.2.jar || curl -L -o app/libs/cling-core-2.1.2.jar https://plugins.gradle.org/m2/org/fourthline/cling/cling-core/2.1.2/cling-core-2.1.2.jar
+          curl -L -o app/libs/cling-support-2.1.2.jar https://repo.maven.apache.org/maven2/org/fourthline/cling/cling-support/2.1.2/cling-support-2.1.2.jar || curl -L -o app/libs/cling-support-2.1.2.jar https://plugins.gradle.org/m2/org/fourthline/cling/cling-support/2.1.2/cling-support-2.1.2.jar
+          ls -l app/libs/
+
+      # 4. 强制项目直接依赖本地的这两个 Jar 包，而不是去网络上找
+      - name: Patch Build Gradle to use Local Jars
+        run: |
+          if [ -f "app/build.gradle.kts" ]; then
+            # 移除原有的远端 cling 依赖声明，替换为依赖本地整个 libs 目录
+            sed -i '/org.fourthline.cling/d' app/build.gradle.kts
+            # 确保里面包含 implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.jar")))) 类似逻辑
+            # 最暴力的做法是直接在 dependencies 块追加
+            sed -i '/dependencies {/a \    implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.jar"))))' app/build.gradle.kts
           fi
 
-      # 4. 赋予新生成的 gradlew 脚本可执行权限
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
