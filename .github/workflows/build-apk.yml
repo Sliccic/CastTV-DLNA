@@ -30,7 +30,7 @@ jobs:
           echo "android.useAndroidX=true" >> gradle.properties
           echo "android.enableJetifier=true" >> gradle.properties
 
-      # 3. 源码级集成：直接拉取 Cling 官方纯净 Java 源码包并现场编译（已成功，保持）
+      # 3. 源码级集成：直接拉取 Cling 官方纯净 Java 源码包并现场编译
       - name: Inject Cling Pure Source Code
         run: |
           echo "正在全量拉取核心组件纯净源码..."
@@ -41,14 +41,14 @@ jobs:
           rm -rf tmp_cling
           echo "--- 源码本底化注入完成 ---"
 
-      # 4. 彻底擦除 build.gradle 中对远端 Cling 依赖的声明（已成功，保持）
+      # 4. 彻底擦除 build.gradle 中对远端 Cling 依赖的声明
       - name: Strip Dead Remote Repository References
         run: |
           if [ -f "app/build.gradle.kts" ]; then
             sed -i '/org.fourthline.cling/d' app/build.gradle.kts
           fi
 
-      # 5. 覆盖并保持结构 100% 合规的完美主界面布局（已成功，保持）
+      # 5. 覆盖并保持结构 100% 合规的完美主界面布局
       - name: Re-write activity_main.xml perfectly
         run: |
           LAYOUT_FILE="app/src/main/res/layout/activity_main.xml"
@@ -129,42 +129,43 @@ jobs:
           EOF
           echo "--- 智能覆盖复写完成 ---"
 
-      # 6. 核心修复：既然你漏掉了应用图标文件，我们在云端用纯代码自动生成一整套标准的应用默认图片图标，一举消灭 AAPT 报错！
+      # 6. 图标自动补全机制
       - name: Generate Missing App Icons Automatically
         run: |
-          echo "正在云端自动补全缺失的本地应用图标文件..."
-          # 建立图片存放的标准文件夹
           mkdir -p app/src/main/res/mipmap-hdpi
           mkdir -p app/src/main/res/mipmap-mdpi
           mkdir -p app/src/main/res/mipmap-xhdpi
           mkdir -p app/src/main/res/mipmap-xxhdpi
           mkdir -p app/src/main/res/mipmap-xxxhdpi
-          
-          # 创建一个 1x1 像素的空图片基础流，并利用 Linux 内置转换机制为全部分辨率生成标准桌面 ic_launcher.png 占位符
           printf '\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15c4\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82' > app/src/main/res/mipmap-hdpi/ic_launcher.png
           cp app/src/main/res/mipmap-hdpi/ic_launcher.png app/src/main/res/mipmap-mdpi/ic_launcher.png
           cp app/src/main/res/mipmap-hdpi/ic_launcher.png app/src/main/res/mipmap-xhdpi/ic_launcher.png
           cp app/src/main/res/mipmap-hdpi/ic_launcher.png app/src/main/res/mipmap-xxhdpi/ic_launcher.png
           cp app/src/main/res/mipmap-hdpi/ic_launcher.png app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
-          
-          # 顺便检查或生成常伴随图标一起存在的圆角图标 (ic_launcher_round.png)
           cp app/src/main/res/mipmap-hdpi/ic_launcher.png app/src/main/res/mipmap-hdpi/ic_launcher_round.png
           cp app/src/main/res/mipmap-hdpi/ic_launcher.png app/src/main/res/mipmap-mdpi/ic_launcher_round.png
           cp app/src/main/res/mipmap-hdpi/ic_launcher.png app/src/main/res/mipmap-xhdpi/ic_launcher_round.png
           cp app/src/main/res/mipmap-hdpi/ic_launcher.png app/src/main/res/mipmap-xxhdpi/ic_launcher_round.png
           cp app/src/main/res/mipmap-hdpi/ic_launcher.png app/src/main/res/mipmap-xxxhdpi/ic_launcher_round.png
-          
-          echo "--- 图标自动补全机制执行成功 ---"
-          ls -R app/src/main/res/mipmap-*
+
+      # 7. 终极强杀 AAPT 资源链接报错：将原作者写错的 fillColor="none" 批量智能替换为标准合规的透明色表示 "#00000000"
+      - name: Kill AAPT Color None Error
+        run: |
+          VECTOR_FILE="app/src/main/res/drawable/ic_launcher.xml"
+          if [ -f "$VECTOR_FILE" ]; then
+            echo "--- 正在强行修正 ic_launcher.xml 中的 fillColor 语法错误 ---"
+            sed -i 's/fillColor="none"/fillColor="#00000000"/g' $VECTOR_FILE
+            cat $VECTOR_FILE
+          fi
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      # 7. 执行最后的代码一键生成
+      # 8. 执行最后的代码一键生成
       - name: Build with Gradle
         run: ./gradlew assembleDebug assembleRelease
 
-      # 8. 将最终生成的可用安装包推送至面板供你下载
+      # 9. 将最终生成的可用安装包推送至面板供你下载
       - name: Upload APK Artifacts
         uses: actions/upload-artifact@v4
         with:
