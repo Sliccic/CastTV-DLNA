@@ -24,20 +24,33 @@ jobs:
       - name: Regenerate Gradle Wrapper
         run: gradle wrapper --gradle-version 8.5
 
-      # 2. 核心修复：直接在云端强行注入 AndroidX 开关配置，解决这次报错
+      # 2. 强行注入 AndroidX 全局开关
       - name: Enable AndroidX in gradle.properties
         run: |
           echo "android.useAndroidX=true" >> gradle.properties
           echo "android.enableJetifier=true" >> gradle.properties
 
+      # 3. 核心修复：给项目仓库配置强行追加包含 Cling 依赖的公共快照库 (Bonsai/Jitpack 镜像)
+      # 使用 4thline 倒闭后社区最常用的 4thline 遗产备份源地址
+      - name: Inject Cling Legacy Repository
+        run: |
+          if [ -f "settings.gradle.kts" ]; then
+            # 如果是现代的 settings.gradle.kts 结构，动态往里面塞入备用 maven 地址
+            sed -i '/mavenCentral()/a \        maven { url = java.net.URI("https://maven.brokenvessel.org/releases") }\n        maven { url = java.net.URI("https://jitpack.io") }' settings.gradle.kts
+          fi
+          if [ -f "build.gradle.kts" ]; then
+            sed -i '/mavenCentral()/a \    maven { url = java.net.URI("https://maven.brokenvessel.org/releases") }\n    maven { url = java.net.URI("https://jitpack.io") }' build.gradle.kts
+          fi
+
+      # 4. 赋予新生成的 gradlew 脚本可执行权限
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      # 3. 执行编译
+      # 5. 执行编译
       - name: Build with Gradle
         run: ./gradlew assembleDebug assembleRelease
 
-      # 4. 上传编译好的 APK
+      # 6. 上传编译好的 APK
       - name: Upload APK Artifacts
         uses: actions/upload-artifact@v4
         with:
