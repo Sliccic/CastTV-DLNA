@@ -30,24 +30,36 @@ jobs:
           echo "android.useAndroidX=true" >> gradle.properties
           echo "android.enableJetifier=true" >> gradle.properties
 
-      # 3. 稳健修复：通过添加浏览器标识，直接从官方插件源拉取有效的 cling 核心二进制包
-      - name: Download Cling Jars Securely
+      # 3. 核心大招：进行彻底的用户代理伪装，从官方权威底层存储池拉取真正的 .jar 实体包（多源轮询保护）
+      - name: Download Real Cling Jars Securely
         run: |
           mkdir -p app/libs
-          curl -L -A "Mozilla/5.0" -o app/libs/cling-core-2.1.2.jar https://plugins.gradle.org/m2/org/fourthline/cling/cling-core/2.1.2/cling-core-2.1.2.jar
-          curl -L -A "Mozilla/5.0" -o app/libs/cling-support-2.1.2.jar https://plugins.gradle.org/m2/org/fourthline/cling/cling-support/2.1.2/cling-support-2.1.2.jar
           
-          echo "--- 检查下载的本地依赖依赖包大小 ---"
+          # 策略 A：使用完美的独立安全代理头直接从 Maven 官方冷存根分支和全球插件节点拉取物理流
+          curl -L -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" -o app/libs/cling-core-2.1.2.jar https://repo1.maven.org/maven2/org/fourthline/cling/cling-core/2.1.2/cling-core-2.1.2.jar
+          curl -L -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" -o app/libs/cling-support-2.1.2.jar https://repo1.maven.org/maven2/org/fourthline/cling/cling-support/2.1.2/cling-support-2.1.2.jar
+          
+          echo "--- 第一轮拉取包大小校验 ---"
           ls -lh app/libs/
           
-          if [ $(stat -c%s "app/libs/cling-core-2.1.2.jar") -lt 10000 ]; then
-            echo "触发备用节点下载..."
-            curl -L -o app/libs/cling-core-2.1.2.jar https://maven.aliyun.com/repository/public/org/fourthline/cling/cling-core/2.1.2/cling-core-2.1.2.jar
-            curl -L -o app/libs/cling-support-2.1.2.jar https://maven.aliyun.com/repository/public/org/fourthline/cling/cling-support/2.1.2/cling-support-2.1.2.jar
+          # 策略 B：如果发现包大小依然不对（低于 50KB 则必为假网页拦截），立刻启动全球高校和公共历史归档镜像（JCenter遗产永久镜像）
+          if [ $(stat -c%s "app/libs/cling-core-2.1.2.jar") -lt 50000 ]; then
+            echo "第一源拦截，正在从全球遗产冷备中心抢救性拉取实体依赖..."
+            curl -L -A "Mozilla/5.0" -o app/libs/cling-core-2.1.2.jar https://jcenter.bintray.com/org/fourthline/cling/cling-core/2.1.2/cling-core-2.1.2.jar
+            curl -L -A "Mozilla/5.0" -o app/libs/cling-support-2.1.2.jar https://jcenter.bintray.com/org/fourthline/cling/cling-support/2.1.2/cling-support-2.1.2.jar
+            echo "--- 归档源抢救性大小校验 ---"
+            ls -lh app/libs/
+          fi
+          
+          # 策略 C：终极兜底，如果是全网高版本 Gradle 安全策略拦截了本地下载，我们利用华为云/腾讯云历史全量同步快照
+          if [ $(stat -c%s "app/libs/cling-core-2.1.2.jar") -lt 50000 ]; then
+            echo "启动最后的公共快照实体覆盖..."
+            curl -L -o app/libs/cling-core-2.1.2.jar https://mirrors.huaweicloud.com/repository/maven/org/fourthline/cling/cling-core/2.1.2/cling-core-2.1.2.jar
+            curl -L -o app/libs/cling-support-2.1.2.jar https://mirrors.huaweicloud.com/repository/maven/org/fourthline/cling/cling-support/2.1.2/cling-support-2.1.2.jar
             ls -lh app/libs/
           fi
 
-      # 4. 强制打包系统去依赖本地刚刚下载好的实体类库
+      # 4. 强制项目绕过网络依赖，闭着眼睛直接吞掉本地 app/libs 下拉取到的两个实体包
       - name: Patch Build Gradle to use Local Jars
         run: |
           if [ -f "app/build.gradle.kts" ]; then
@@ -55,7 +67,7 @@ jobs:
             sed -i '/dependencies {/a \    implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.jar"))))' app/build.gradle.kts
           fi
 
-      # 5. 覆盖并替换原本语法结构错乱的 activity_main.xml
+      # 5. 覆盖并替换原本结构彻底写崩的 activity_main.xml
       - name: Re-write activity_main.xml perfectly
         run: |
           LAYOUT_FILE="app/src/main/res/layout/activity_main.xml"
