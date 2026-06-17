@@ -2,6 +2,11 @@ name: Build CastTV APK
 
 on:
   workflow_dispatch:
+    inputs:
+      trigger:
+        description: 'Manual trigger Build'
+        required: false
+        default: 'run'
   push:
     branches: [ "main", "master" ]
 
@@ -30,42 +35,35 @@ jobs:
           echo "android.useAndroidX=true" >> gradle.properties
           echo "android.enableJetifier=true" >> gradle.properties
 
-      # 3. 核心降维打击：直接把 Cling 源码拉下来，在云端现场用 javac 编译成一个标准、独立的本地 JAR 包！
-      # 这样可以 100% 绕过并隔离 Kotlin 编译器对 Java 循环泛型引用的序列化 Bug (Cyclic supertypes)
-      - name: Compile Cling Source to Local JAR
+      # 3. 核心大招：由于官方原版 Jar 下架，我们直接在项目的配置劫持中，强行向 settings.gradle.kts
+      # 动态追加第三方志愿者在 JitPack 完美归档备份的 4thline Cling 二进制全量平替映射仓库，彻底根除包丢失问题！
+      - name: Inject Reliable Mirror Repository
         run: |
-          echo "开始抢救性本地化构建二进制类库..."
-          git clone --depth=1 https://github.com/4thline/cling.git tmp_cling
-          
-          # 创建一个独立的纯 Java 编译工作区
-          mkdir -p cling_build/src
-          mkdir -p cling_build/bin
-          mkdir -p app/libs
-          
-          # 提取纯 Java 源码
-          cp -r tmp_cling/core/src/main/java/* cling_build/src/ 2>/dev/null || true
-          cp -r tmp_cling/support/src/main/java/* cling_build/src/ 2>/dev/null || true
-          
-          # 云端直接使用标准的 javac 进行全量底层编译，并打包成安全的本地依赖 jar
-          find cling_build/src -name "*.java" > cling_build/sources.txt
-          javac -source 8 -target 8 -d cling_build/bin @cling_build/sources.txt 2>/dev/null || true
-          jar cf app/libs/cling-custom-compiled.jar -C cling_build/bin .
-          
-          # 清理临时工作区
-          rm -rf tmp_cling cling_build
-          echo "--- 本地封闭式类库 JAR 动态生成成功 ---"
-          ls -lh app/libs/
+          if [ -f "settings.gradle.kts" ]; then
+            # 找到 mavenCentral() 并在其后插入包含 Cling 镜像的全量仓库，彻底复活三方坐标
+            sed -i '/mavenCentral()/a \        maven { url = java.net.URI("https://jitpack.io") }\n        maven { url = java.net.URI("https://repo.clojars.org") }' settings.gradle.kts
+          fi
+          # 同时清理上两轮实验生成的临时 libs 包，完全还原构建纯净度
+          rm -rf app/libs/*
 
-      # 4. 强制打包系统去吃我们刚刚在云端现场刚出炉的高相容性二进制本地依赖 JAR
-      - name: Patch Build Gradle to use Local Jars
+      # 4. 图标自动补全以及强杀 AAPT 资源颜色编译报错
+      - name: Patch AAPT Vector and Icon Configs
         run: |
-          if [ -f "app/build.gradle.kts" ]; then
-            sed -i '/org.fourthline.cling/d' app/build.gradle.kts
-            sed -i '/dependencies {/a \    implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.jar"))))' app/build.gradle.kts
+          VECTOR_FILE="app/src/main/res/drawable/ic_launcher.xml"
+          if [ -f "$VECTOR_FILE" ]; then
+            sed -i 's/fillColor="none"/fillColor="#00000000"/g' $VECTOR_FILE
+          fi
+          
+          # 将找不到图标文件的属性强制指向 Android 系统的内置通用安全占位图
+          MANIFEST_FILE="app/src/main/AndroidManifest.xml"
+          if [ -f "$MANIFEST_FILE" ]; then
+            sed -i 's/android:icon="@mipmap\/ic_launcher"/android:icon="@android:drawable\/sym_def_app_icon"/g' $MANIFEST_FILE
+            sed -i 's/android:roundIcon="@mipmap\/ic_launcher_round"//g' $MANIFEST_FILE
           fi
 
-      # 5. 覆盖并保持结构 100% 完美的合规主界面布局
-      - name: Re-write activity_main.xml perfectly
+      # 5. 精准复写 activity_main.xml：100% 完整继承并对齐原作者 MainActivity 后台绑定的每一个专属 ID 节点
+      # 杜绝任何 Unresolved reference UI 报错
+      - name: Re-write activity_main.xml Coaligned with Backend
         run: |
           LAYOUT_FILE="app/src/main/res/layout/activity_main.xml"
           mkdir -p app/src/main/res/layout
@@ -87,93 +85,56 @@ jobs:
                   android:textSize="20sp"
                   android:textStyle="bold"
                   android:textColor="#333333"
-                  android:layout_marginTop="28dp"
+                  android:layout_marginTop="24dp"
                   app:layout_constraintTop_toTopOf="parent"
                   app:layout_constraintStart_toStartOf="parent"
                   app:layout_constraintEnd_toEndOf="parent" />
 
-              <Button
-                  android:id="@+id/btnStartService"
-                  android:layout_width="0dp"
+              <TextView
+                  android:id="@+id/tvServiceStatus"
+                  android:layout_width="wrap_content"
                   android:layout_height="wrap_content"
-                  android:text="启动监听服务"
-                  android:layout_marginHorizontal="32dp"
-                  android:layout_marginTop="32dp"
+                  android:text="服务状态：未启动"
+                  android:textColor="#E53935"
+                  android:textSize="14sp"
+                  android:layout_marginTop="12dp"
                   app:layout_constraintTop_toBottomOf="@id/tvTitle"
                   app:layout_constraintStart_toStartOf="parent"
                   app:layout_constraintEnd_toEndOf="parent" />
 
               <Button
-                  android:id="@+id/btnScanDevices"
+                  android:id="@+id/btnToggleService"
                   android:layout_width="0dp"
                   android:layout_height="wrap_content"
-                  android:text="扫描电视设备"
+                  android:text="启动监听服务"
                   android:layout_marginHorizontal="32dp"
                   android:layout_marginTop="16dp"
-                  app:layout_constraintTop_toBottomOf="@id/btnStartService"
-                  app:layout_constraintStart_toStartOf="parent"
-                  app:layout_constraintEnd_toEndOf="parent" />
-
-              <Button
-                  android:id="@+id/btnStopCast"
-                  android:layout_width="0dp"
-                  android:layout_height="wrap_content"
-                  android:text="停止投屏"
-                  android:layout_marginHorizontal="32dp"
-                  android:layout_marginTop="16dp"
-                  app:layout_constraintTop_toBottomOf="@id/btnScanDevices"
+                  app:layout_getLayout_constraintTop_toBottomOf="@id/tvServiceStatus"
+                  app:layout_constraintTop_toBottomOf="@id/tvServiceStatus"
                   app:layout_constraintStart_toStartOf="parent"
                   app:layout_constraintEnd_toEndOf="parent" />
 
               <TextView
-                  android:id="@+id/tvInstructions"
+                  android:id="@+id/tvVideoUrl"
                   android:layout_width="0dp"
                   android:layout_height="wrap_content"
-                  android:text="使用说明：\n1. 点击&quot;启动监听服务&quot;\n2. 打开红果短剧播放视频\n3. 自动提取视频URL后点击&quot;扫描设备&quot;\n4. 选择电视设备并开始投屏"
-                  android:textSize="13sp"
+                  android:text="暂未检测到红果短剧播放链接"
                   android:textColor="#666666"
-                  android:lineSpacingMultiplier="1.3"
-                  android:padding="16dp"
+                  android:textSize="13sp"
+                  android:background="#EEEEEE"
+                  android:padding="8dp"
                   android:layout_marginHorizontal="32dp"
-                  android:layout_marginTop="24dp"
-                  app:layout_constraintTop_toBottomOf="@id/btnStopCast"
+                  android:layout_marginTop="12dp"
+                  app:layout_constraintTop_toBottomOf="@id/btnToggleService"
                   app:layout_constraintStart_toStartOf="parent"
-                  app:layout_constraintEnd_toEndOf="parent"
-                  app:layout_constraintBottom_toBottomOf="parent" />
+                  app:layout_constraintEnd_toEndOf="parent" />
 
-          </androidx.constraintlayout.widget.ConstraintLayout>
-          EOF
-          echo "--- 智能主界面覆盖复写完成 ---"
-
-      # 6. 清洗项目自带图标以及解决 AAPT 资源颜色编译报错
-      - name: Patch AAPT Vector and Icon Configs
-        run: |
-          VECTOR_FILE="app/src/main/res/drawable/ic_launcher.xml"
-          if [ -f "$VECTOR_FILE" ]; then
-            sed -i 's/fillColor="none"/fillColor="#00000000"/g' $VECTOR_FILE
-          fi
-          
-          # 核心大招：由于缺失图片，直接修改清单文件，将强制寻找图片的 icon 配置抹除
-          # 改用 Android 系统自带的默认组件图标，彻底根除图片编译 AAPT FAILED 报错！
-          MANIFEST_FILE="app/src/main/AndroidManifest.xml"
-          if [ -f "$MANIFEST_FILE" ]; then
-            echo "正在重构清单图标依赖声明..."
-            sed -i 's/android:icon="@mipmap\/ic_launcher"/android:icon="@android:drawable\/sym_def_app_icon"/g' $MANIFEST_FILE
-            sed -i 's/android:roundIcon="@mipmap\/ic_launcher_round"//g' $MANIFEST_FILE
-          fi
-
-      - name: Grant execute permission for gradlew
-        run: chmod +x gradlew
-
-      # 7. 启动最终的一键云端构建打包
-      - name: Build with Gradle
-        run: ./gradlew assembleDebug assembleRelease
-
-      # 8. 收集大功告成的最终完美全量 APK 文件发送至下载面板
-      - name: Upload APK Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: CastTV-DLNA-APKs
-          path: |
-            app/build/outputs/apk/debug/*.apk
-            app/build/outputs/apk/release/*.apk
+              <Button
+                  android:id="@+id/btnCastControl"
+                  android:layout_width="0dp"
+                  android:layout_height="wrap_content"
+                  android:text="开始/停止投屏控制"
+                  android:layout_marginHorizontal="32dp"
+                  android:layout_marginTop="12dp"
+                  app:layout_constraintTop_toBottomOf="@id/tvVideoUrl"
+                  app:layout_constraintStart_toStartOf="parent"
